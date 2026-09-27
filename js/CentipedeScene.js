@@ -178,11 +178,18 @@ export class CentipedeScene extends Phaser.Scene {
     }
 
     spawnScorpion() {
-        const x = 24;
+        const randomNumber = Phaser.Math.Between(0, 1);
+
+        const x = randomNumber === 0 ? 24 : this.scale.width - 24;
         const y = 160 + Phaser.Math.Between(0, 4) * 32;
         const scorpion = this.createEnemy(x, y, 0xff8c42, 'scorpion');
-        scorpion.setData('dir', 1);
-        scorpion.body.setVelocityX(90);
+        if (randomNumber === 0) {
+            scorpion.body.setVelocityX(90);
+            scorpion.setFlipX(true);
+        }
+        else {
+            scorpion.body.setVelocityX(-90);
+        }
         return scorpion;
     }
 
@@ -219,9 +226,7 @@ export class CentipedeScene extends Phaser.Scene {
             0xc084fc,
             'flea'
         );
-        flea.setData('dropSpeed', 120);
-        flea.setData('dropRow', Phaser.Math.Between(0, ROWS - 1));
-        flea.body.setVelocityY(120);
+        flea.body.setVelocityY(180);
         return flea;
     }
 
@@ -232,12 +237,7 @@ export class CentipedeScene extends Phaser.Scene {
             const type = enemy.getData('type');
 
             if (type === 'scorpion') {
-                const direction = enemy.getData('dir');
-                enemy.x += direction * 90 * (delta / 1000);
-                enemy.body.setVelocityX(direction * 90);
-                if (enemy.x < 20 || enemy.x > this.scale.width - 20) {
-                    enemy.setData('dir', direction * -1);
-                }
+
                 this.mushrooms.getChildren().forEach(mushroom => {
                     if (!mushroom.isPoisoned && Phaser.Math.Distance.Between(enemy.x, enemy.y, mushroom.x, mushroom.y) < 18) {
                         this.poisonMushroom(mushroom);
@@ -273,13 +273,10 @@ export class CentipedeScene extends Phaser.Scene {
             }
 
             if (type === 'flea') {
-                enemy.y += enemy.getData('dropSpeed') * (delta / 1000);
-                enemy.body.setVelocityY(enemy.getData('dropSpeed'));
+                if (Phaser.Math.Between(0, 25) - this.level === 0) {
+                    this.createMushroom(enemy.x, enemy.y);
+                }
                 if (enemy.y > this.scale.height - 20) {
-                    const row = Phaser.Math.Between(0, ROWS - 1);
-                    const x = Math.round(enemy.x / TILE) * TILE + TILE / 2;
-                    const y = PLAYFIELD_TOP + (row * TILE) + TILE / 2;
-                    this.createMushroom(x, y);
                     enemy.destroy();
                 }
             }
@@ -356,9 +353,12 @@ export class CentipedeScene extends Phaser.Scene {
         if (!bug) return;
 
         bug.dir *= -1;
+        bug.head.x = Phaser.Math.Clamp(bug.head.x, 20, this.scale.width - 20);
+        bug.head.body.setVelocity(0, 0);
         bug.head.body.setVelocityX(bug.speed * bug.dir);
         bug.segments.forEach(s => {
             s.setFlipX(bug.dir === 1);
+            s.body.setVelocity(0, 0);
             s.body.setVelocityX(bug.speed * bug.dir);
         });
         this.turnDown(bug);
@@ -419,24 +419,7 @@ export class CentipedeScene extends Phaser.Scene {
             if (b.y < 0) b.destroy();
         });
 
-        // this.bullets.getChildren().forEach(bullet => {
-        //     if (!bullet || !bullet.active) return;
 
-        //     const hitMushroom = this.mushrooms.getChildren().find(mushroom =>
-        //         mushroom && mushroom.active && Phaser.Math.Distance.Between(bullet.x, bullet.y, mushroom.x, mushroom.y) < 16
-        //     );
-        //     if (hitMushroom) {
-        //         this.hitMushroom(bullet, hitMushroom);
-        //         return;
-        //     }
-
-        //     const hitEnemy = this.enemyGroup.getChildren().find(enemy =>
-        //         enemy && enemy.active && Phaser.Math.Distance.Between(bullet.x, bullet.y, enemy.x, enemy.y) < 18
-        //     );
-        //     if (hitEnemy) {
-        //         this.hitEnemy(bullet, hitEnemy);
-        //     }
-        // });
 
         this.bugs = this.bugs.filter(bug => bug && bug.head && bug.head.active && bug.segments.length > 0);
         this.playerZoneSpawnTimer = Math.max(0, this.playerZoneSpawnTimer - delta);
@@ -481,18 +464,26 @@ export class CentipedeScene extends Phaser.Scene {
 
             if (bug.isDescending) {
                 this.finishDescent(bug);
-            } else if (bug.head.x <= 16 || bug.head.x >= this.scale.width - 16) {
-                this.handleCentipedeCollision(bug);
-            } else if (bug.head.y >= this.scale.height * 0.8) {
-                bug.dir *= -1;
-                bug.head.body.setVelocityX(bug.speed * bug.dir);
-                bug.segments.forEach(s => {
-                    s.setFlipX(bug.dir === 1);
-                    s.body.setVelocityX(bug.speed * bug.dir);
-                });
-                if (this.playerZoneSpawnTimer <= 0) {
-                    this.playerZoneSpawnTimer = 1500;
-                    this.spawnHeadCentipede();
+            } else {
+                const hittingMushroom = this.mushrooms.getChildren().some(mushroom =>
+                    mushroom && Phaser.Math.Distance.Between(bug.head.x, bug.head.y, mushroom.x, mushroom.y) < 18
+                );
+
+                if (hittingMushroom) {
+                    this.handleCentipedeCollision(bug);
+                } else if (bug.head.x <= 16 || bug.head.x >= this.scale.width - 16) {
+                    this.handleCentipedeCollision(bug);
+                } else if (bug.head.y >= this.scale.height * 0.8) {
+                    bug.dir *= -1;
+                    bug.head.body.setVelocityX(bug.speed * bug.dir);
+                    bug.segments.forEach(s => {
+                        s.setFlipX(bug.dir === 1);
+                        s.body.setVelocityX(bug.speed * bug.dir);
+                    });
+                    if (this.playerZoneSpawnTimer <= 0) {
+                        this.playerZoneSpawnTimer = 1500;
+                        this.spawnHeadCentipede();
+                    }
                 }
             }
         });
@@ -525,10 +516,13 @@ export class CentipedeScene extends Phaser.Scene {
         if (!bug || bug.head.y < bug.descentTargetY) return;
 
         bug.isDescending = false;
+        bug.head.x = Phaser.Math.Clamp(bug.head.x, 20, this.scale.width - 20);
         bug.head.body.reset(bug.head.x, bug.descentTargetY);
+        bug.head.body.setVelocity(0, 0);
         bug.head.body.setVelocityX(bug.speed * bug.dir);
         bug.segments.forEach(s => {
             s.setFlipX(bug.dir === 1);
+            s.body.setVelocity(0, 0);
             s.body.setVelocityX(bug.speed * bug.dir);
             this.playCentipedeAnimation(s, 'horizontal');
         });
@@ -764,6 +758,25 @@ export class CentipedeScene extends Phaser.Scene {
         this.updateHud();
     }
 
+    reindexBugHead(bug) {
+        if (!bug || !Array.isArray(bug.segments) || bug.segments.length === 0) return null;
+
+        bug.segments = bug.segments.filter(s => s && s.active);
+        if (bug.segments.length === 0) {
+            bug.head = null;
+            return null;
+        }
+
+        bug.head = bug.segments[0];
+        bug.segments.forEach((s, index) => {
+            s.setData('bug', bug);
+            s.setData('isHead', index === 0);
+        });
+
+        this.head = bug.head;
+        return bug;
+    }
+
     hitSegment(bullet, segment) {
         bullet.destroy();
 
@@ -792,18 +805,17 @@ export class CentipedeScene extends Phaser.Scene {
                 }
 
                 bug.segments = remainingSegments;
-                bug.head = newHead;
-                bug.head.setData('isHead', true);
+                this.reindexBugHead(bug);
                 bug.head.body.setVelocityX(bug.speed * bug.dir);
-                this.head = newHead;
-                this.playCentipedeAnimation(newHead, 'horizontal');
+                this.head = bug.head;
+                this.playCentipedeAnimation(bug.head, 'horizontal');
                 bug.headTrail = [
-                    { x: newHead.x, y: newHead.y },
-                    ...remainingSegments.slice(1).map(s => ({ x: s.x, y: s.y }))
+                    { x: bug.head.x, y: bug.head.y },
+                    ...bug.segments.slice(1).map(s => ({ x: s.x, y: s.y }))
                 ];
-                remainingSegments.forEach(s => s.setData('bug', bug));
             } else {
                 bug.segments = [];
+                bug.head = null;
                 this.bugs = this.bugs.filter(currentBug => currentBug !== bug);
             }
 
@@ -828,24 +840,25 @@ export class CentipedeScene extends Phaser.Scene {
             if (!newFrontHead || !newFrontHead.body) {
                 this.bugs = this.bugs.filter(currentBug => currentBug !== bug);
             } else {
+                this.reindexBugHead(bug);
                 bug.head = newFrontHead;
                 bug.head.setData('isHead', true);
                 bug.headTrail = [
                     { x: bug.head.x, y: bug.head.y },
-                    ...frontSegments.slice(1).map(s => ({ x: s.x, y: s.y }))
+                    ...bug.segments.slice(1).map(s => ({ x: s.x, y: s.y }))
                 ];
-                frontSegments.forEach(s => s.setData('bug', bug));
-                frontSegments.slice(1).forEach(s => s.setData('isHead', false));
+                this.head = bug.head;
             }
         } else {
             bug.segments = [];
+            bug.head = null;
             this.bugs = this.bugs.filter(currentBug => currentBug !== bug);
         }
 
         if (backSegments.length > 0) {
             const newBug = {
                 segments: backSegments,
-                head: backSegments[0],
+                head: null,
                 dir: bug.dir,
                 speed: bug.speed,
                 isDescending: false,
@@ -853,13 +866,12 @@ export class CentipedeScene extends Phaser.Scene {
                 descentTargetY: 0,
                 isPoisoned: false
             };
-            newBug.head.setData('isHead', true);
-            backSegments.forEach(s => s.setData('bug', newBug));
-            backSegments.slice(1).forEach(s => s.setData('isHead', false));
+            this.reindexBugHead(newBug);
             newBug.headTrail = [
                 { x: newBug.head.x, y: newBug.head.y },
-                ...backSegments.slice(1).map(s => ({ x: s.x, y: s.y }))
+                ...newBug.segments.slice(1).map(s => ({ x: s.x, y: s.y }))
             ];
+            newBug.head.setData('isHead', true);
             this.bugs.push(newBug);
         }
 
@@ -868,7 +880,7 @@ export class CentipedeScene extends Phaser.Scene {
 
         this.createMushroom(
             Math.floor(segment.x / TILE) * TILE + TILE / 2,
-            Math.floor(segment.y / TILE) * TILE + TILE / 2
+            PLAYFIELD_TOP + ((Math.floor((segment.y - PLAYFIELD_TOP) / TILE) + 0.5) * TILE)
         );
     }
 }
