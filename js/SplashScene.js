@@ -9,6 +9,7 @@ export class SplashScene extends Phaser.Scene {
             frameHeight: 352,
             endFrame: 49
         });
+        this.load.image('maxxdaddy', 'assets/images/maxxdaddy.gif');
     }
 
     create() {
@@ -27,6 +28,10 @@ export class SplashScene extends Phaser.Scene {
         splash.setScale(scale);
         splash.setOrigin(0.5);
         splash.play('splash-anim');
+
+        const maxXdaddy = this.add.image(width - 18, height - 18, 'maxxdaddy');
+        maxXdaddy.setOrigin(1, 1);
+        maxXdaddy.setDepth(10);
 
         this.add.text(width / 2, height - 80, 'PRESS ANY KEY', {
             fontFamily: 'monospace',

@@ -1,4 +1,6 @@
 
+import { normalizeCentipedeBugHead } from './centipedeHeadUtils.mjs';
+
 const TILE = 32;
 const COLS = 20;
 const ROWS = 25;
@@ -48,6 +50,18 @@ export class CentipedeScene extends Phaser.Scene {
             frameWidth: 8,
             frameHeight: 8
         });
+        this.load.spritesheet('explosion-sprites-1', 'assets/images/explosion_spritesheet 1.png', {
+            frameWidth: 8,
+            frameHeight: 8
+        });
+        this.load.spritesheet('explosion-sprites-2', 'assets/images/explosion_spritesheet 2.png', {
+            frameWidth: 8,
+            frameHeight: 8
+        });
+        this.load.spritesheet('flea-explosion-sprites', 'assets/images/flea_explosion_spritesheet.png', {
+            frameWidth: 8,
+            frameHeight: 8
+        });
         this.load.image('player-sprite', 'assets/images/player_sprite.png');
         this.load.image('bullet-sprite', 'assets/images/bullet_sprite.png');
     }
@@ -63,6 +77,7 @@ export class CentipedeScene extends Phaser.Scene {
         this.levelTransitioning = false;
         this.levelCompleteText = null;
         this.playerZoneSpawnTimer = 0;
+        this.playerHitCooldown = 0;
         this.paletteData = this.cache.json.get('level-palettes').levels;
         this.defaultPalette = this.paletteData[0];
         this.centipedeHeadTextureKey = 'centipede-head-sprites';
@@ -123,6 +138,8 @@ export class CentipedeScene extends Phaser.Scene {
         this.physics.add.overlap(this.bullets, this.segments, this.hitSegment, null, this);
         this.physics.add.overlap(this.bullets, this.mushrooms, this.hitMushroom, null, this);
         this.physics.add.overlap(this.bullets, this.enemyGroup, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.player, this.segments, this.handlePlayerHit, null, this);
+        this.physics.add.overlap(this.player, this.enemyGroup, this.handlePlayerHit, null, this);
     }
 
     createEnemy(x, y, color, type) {
@@ -340,6 +357,7 @@ export class CentipedeScene extends Phaser.Scene {
             }
         }
 
+        normalizeCentipedeBugHead(bug);
         bug.head.body.setVelocityX(this.speed * bug.dir);
         bug.headTrail = [
             { x: bug.head.x, y: bug.head.y },
@@ -421,7 +439,10 @@ export class CentipedeScene extends Phaser.Scene {
 
 
 
+        this.bugs = this.bugs.filter(bug => bug && Array.isArray(bug.segments));
+        this.bugs.forEach(bug => normalizeCentipedeBugHead(bug));
         this.bugs = this.bugs.filter(bug => bug && bug.head && bug.head.active && bug.segments.length > 0);
+        this.playerHitCooldown = Math.max(0, this.playerHitCooldown - delta);
         this.playerZoneSpawnTimer = Math.max(0, this.playerZoneSpawnTimer - delta);
 
         this.bugs.forEach(bug => {
@@ -499,6 +520,7 @@ export class CentipedeScene extends Phaser.Scene {
         bug.dir = Phaser.Math.Between(0, 1) === 0 ? -1 : 1;
         bug.head.body.setVelocityX(bug.speed * bug.dir);
         bug.head.setFlipX(bug.dir === 1);
+        this.turnDown(bug);
     }
 
     turnDown(bug = this.bugs[0]) {
@@ -591,7 +613,10 @@ export class CentipedeScene extends Phaser.Scene {
             { key: 'scorpion-move', texture: 'scorpion-sprites', start: 0, end: 3 },
             { key: 'spider-move', texture: 'spider-sprites', start: 0, end: 7 },
             { key: 'flea-move', texture: 'flea-sprites', start: 0, end: 1 },
-            { key: 'grasshopper-move', texture: 'grasshopper-sprites', start: 0, end: 3 }
+            { key: 'grasshopper-move', texture: 'grasshopper-sprites', start: 0, end: 3 },
+            { key: 'explosion-1', texture: 'explosion-sprites-1', start: 0, end: 7 },
+            { key: 'explosion-2', texture: 'explosion-sprites-2', start: 0, end: 7 },
+            { key: 'flea-explosion', texture: 'flea-explosion-sprites', start: 0, end: 5 }
         ];
 
         animationDefs.forEach(({ key, texture, start, end }) => {
@@ -604,7 +629,7 @@ export class CentipedeScene extends Phaser.Scene {
                 key,
                 frames: this.anims.generateFrameNumbers(texture, { start, end }),
                 frameRate: key.includes('spider') || key.includes('scorpion') || key.includes('grasshopper') ? 10 : 8,
-                repeat: -1
+                repeat: key.includes('explosion') ? 0 : -1
             });
         });
     }
@@ -746,12 +771,46 @@ export class CentipedeScene extends Phaser.Scene {
             mushroom.destroy();
         }
     }
+
+    spawnExplosion(x, y, type = 'player') {
+        const isFlea = type === 'flea';
+        const spriteKey = isFlea ? 'flea-explosion-sprites' : 'explosion-sprites-1';
+        const animationKey = isFlea ? 'flea-explosion' : 'explosion-1';
+        const explosion = this.add.sprite(x, y, spriteKey);
+        explosion.setDepth(30);
+        explosion.setScale(3);
+        explosion.play(animationKey);
+        explosion.once('animationcomplete', () => explosion.destroy());
+        return explosion;
+    }
+
+    handlePlayerHit(player, target) {
+        if (!player || !target || this.playerHitCooldown > 0) return;
+
+        const hitX = target.x ?? player.x;
+        const hitY = target.y ?? player.y;
+        this.spawnExplosion(hitX, hitY, 'player');
+        this.playerHitCooldown = 500;
+        this.player.setTint(0xff6666);
+        this.time.delayedCall(120, () => this.player.clearTint());
+
+        if (target && target.destroy && target.active) {
+            target.destroy();
+        }
+
+        this.lives = Math.max(0, this.lives - 1);
+        if (this.lives <= 0) {
+            this.scene.restart({ level: this.level });
+        }
+    }
+
     hitEnemy(bullet, enemy) {
         if (!enemy || typeof enemy.getData !== 'function') return;
         const type = enemy.getData('type');
         if (type !== 'spider' && type !== 'scorpion' && type !== 'flea' && type !== 'grasshopper') return;
 
         bullet.destroy();
+        this.spawnExplosion(enemy.x, enemy.y, type === 'flea' ? 'flea' : 'player');
         enemy.destroy();
         this.enemies = this.enemies.filter(current => current !== enemy);
         this.score += 300;
@@ -759,22 +818,11 @@ export class CentipedeScene extends Phaser.Scene {
     }
 
     reindexBugHead(bug) {
-        if (!bug || !Array.isArray(bug.segments) || bug.segments.length === 0) return null;
+        const normalizedBug = normalizeCentipedeBugHead(bug);
+        if (!normalizedBug || !normalizedBug.head) return null;
 
-        bug.segments = bug.segments.filter(s => s && s.active);
-        if (bug.segments.length === 0) {
-            bug.head = null;
-            return null;
-        }
-
-        bug.head = bug.segments[0];
-        bug.segments.forEach((s, index) => {
-            s.setData('bug', bug);
-            s.setData('isHead', index === 0);
-        });
-
-        this.head = bug.head;
-        return bug;
+        this.head = normalizedBug.head;
+        return normalizedBug;
     }
 
     hitSegment(bullet, segment) {
